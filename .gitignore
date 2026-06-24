@@ -4,3 +4,9 @@ dist/
 .env.local
 *.log
 .DS_Store
+
+# Tooling / framework (not project source)
+.agents/
+.claude/
+_bmad/
+target/

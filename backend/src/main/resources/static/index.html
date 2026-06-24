@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="bg">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Пръв на Място - радар за инциденти</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font-family:
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          sans-serif;
+      }
+      #app {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+        padding: 12px 16px;
+        background: #0f172a;
+        color: #fff;
+      }
+      header h1 {
+        font-size: 18px;
+        margin: 0;
+        font-weight: 700;
+      }
+      header .sub {
+        font-size: 12px;
+        color: #94a3b8;
+      }
+      header select {
+        margin-left: auto;
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: none;
+        background: #1e293b;
+        color: #fff;
+        font-size: 14px;
+      }
+      .count {
+        font-size: 13px;
+        color: #94a3b8;
+      }
+
+      main {
+        flex: 1;
+        display: flex;
+        min-height: 0;
+      }
+      #map {
+        flex: 1;
+      }
+
+      aside {
+        width: 340px;
+        border-left: 1px solid #e2e8f0;
+        overflow-y: auto;
+        background: #f8fafc;
+      }
+      aside .panel-title {
+        padding: 12px 16px;
+        font-size: 13px;
+        font-weight: 700;
+        color: #475569;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        border-bottom: 1px solid #e2e8f0;
+        background: #fff;
+        position: sticky;
+        top: 0;
+      }
+      .card {
+        padding: 12px 16px;
+        border-bottom: 1px solid #e2e8f0;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      .card:hover {
+        background: #eef2ff;
+      }
+      .card .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .badge {
+        font-size: 11px;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 999px;
+        color: #fff;
+      }
+      .badge.ACCIDENT {
+        background: #dc2626;
+      }
+      .badge.HAZARD {
+        background: #ea580c;
+      }
+      .dist {
+        margin-left: auto;
+        font-weight: 700;
+        color: #0f172a;
+      }
+      .card .street {
+        font-size: 14px;
+        margin: 6px 0 2px;
+        color: #0f172a;
+      }
+      .card .meta {
+        font-size: 12px;
+        color: #64748b;
+      }
+      .nav {
+        font-size: 12px;
+        color: #2563eb;
+        text-decoration: none;
+      }
+      .badge.onscene {
+        background: #16a34a;
+      }
+      .onscene-by {
+        font-size: 12px;
+        color: #16a34a;
+        margin: 4px 0 0;
+        font-weight: 600;
+      }
+      .help-btn {
+        margin-top: 8px;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 6px 10px;
+        border-radius: 8px;
+        border: 1px solid #cbd5e1;
+        background: #fff;
+        color: #0f172a;
+        cursor: pointer;
+      }
+      .help-btn:hover {
+        background: #f1f5f9;
+      }
+      .help-btn.active {
+        border-color: #16a34a;
+        color: #16a34a;
+      }
+      .empty {
+        padding: 24px 16px;
+        color: #94a3b8;
+        font-size: 14px;
+      }
+
+      @keyframes flash {
+        from {
+          background: #fde68a;
+        }
+        to {
+          background: transparent;
+        }
+      }
+      .card.new {
+        animation: flash 2s ease-out;
+      }
+      @media (max-width: 720px) {
+        aside {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <div>
+          <h1>Пръв на Място</h1>
+          <div class="sub">
+            Радар за пътни инциденти на живо · източник: TomTom
+          </div>
+        </div>
+        <select id="operator"></select>
+      </header>
+      <main>
+        <div id="map"></div>
+        <aside>
+          <div class="panel-title" id="panel-title">Инциденти в обхват</div>
+          <div id="list">
+            <div class="empty">
+              Изберете оператор, за да видите инцидентите в неговия район.
+            </div>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+      const BG_CENTER = [42.7, 25.3];
+      const map = L.map("map").setView(BG_CENTER, 7);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "© OpenStreetMap",
+        maxZoom: 18,
+      }).addTo(map);
+
+      let operators = [];
+      const incidentMarkers = new Map(); // id -> marker (only the selected operator's in-range incidents)
+      let selectedOperator = null;
+      let coverageLayer = null; // operator base marker + radius circle
+      let refreshTimer = null;
+
+      const incidentIcon = (type) =>
+        L.divIcon({
+          className: "",
+          html: `<div style="font-size:22px;line-height:22px">${type === "ACCIDENT" ? "💥" : "⚠️"}</div>`,
+          iconSize: [22, 22],
+          iconAnchor: [11, 11],
+        });
+
+      function km(n) {
+        return n < 1 ? Math.round(n * 1000) + " м" : n.toFixed(1) + " км";
+      }
+      function navUrl(lat, lng) {
+        return `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`;
+      }
+
+      function addIncidentMarker(inc) {
+        if (incidentMarkers.has(inc.id)) return;
+        const m = L.marker([inc.lat, inc.lng], {
+          icon: incidentIcon(inc.type),
+        }).addTo(map);
+        m.bindPopup(
+          `<b>${inc.type}</b><br>${inc.street || inc.city || "неизвестно място"}`,
+        );
+        incidentMarkers.set(inc.id, m);
+      }
+
+      async function loadOperators() {
+        operators = await fetch("/api/operators").then((r) => r.json());
+        const sel = document.getElementById("operator");
+        sel.innerHTML =
+          '<option value="">— изберете оператор —</option>' +
+          operators
+            .map(
+              (o) =>
+                `<option value="${o.id}">${o.name} (${o.city}, ${o.radiusKm} км)</option>`,
+            )
+            .join("");
+        sel.addEventListener("change", () => selectOperator(sel.value));
+      }
+
+      function clearIncidentMarkers() {
+        incidentMarkers.forEach((m) => map.removeLayer(m));
+        incidentMarkers.clear();
+      }
+
+      function drawCoverage(op) {
+        if (coverageLayer) map.removeLayer(coverageLayer);
+        coverageLayer = L.layerGroup([
+          L.circle([op.baseLat, op.baseLng], {
+            radius: op.radiusKm * 1000,
+            color: "#2563eb",
+            fillColor: "#3b82f6",
+            fillOpacity: 0.12,
+          }),
+          L.marker([op.baseLat, op.baseLng]).bindPopup(
+            `<b>${op.name}</b><br>База · ${op.radiusKm} км обхват`,
+          ),
+        ]).addTo(map);
+        map.setView([op.baseLat, op.baseLng], 10);
+      }
+
+      async function selectOperator(id) {
+        selectedOperator = operators.find((o) => o.id === id) || null;
+        const title = document.getElementById("panel-title");
+        if (!selectedOperator) {
+          if (coverageLayer) {
+            map.removeLayer(coverageLayer);
+            coverageLayer = null;
+          }
+          clearIncidentMarkers();
+          title.textContent = "Инциденти в обхват";
+          document.getElementById("list").innerHTML =
+            '<div class="empty">Изберете оператор, за да видите инцидентите в неговия район.</div>';
+          map.setView(BG_CENTER, 7);
+          return;
+        }
+        drawCoverage(selectedOperator);
+        title.textContent = `В обхват на ${selectedOperator.name}`;
+        await refreshMatches();
+      }
+
+      async function refreshMatches(newId) {
+        if (!selectedOperator) return;
+        const matches = await fetch(
+          `/api/operators/${selectedOperator.id}/incidents`,
+        ).then((r) => r.json());
+        // The map shows only the selected operator's in-range incidents.
+        clearIncidentMarkers();
+        matches.forEach(({ incident: inc }) => addIncidentMarker(inc));
+        const list = document.getElementById("list");
+        if (matches.length === 0) {
+          list.innerHTML =
+            '<div class="empty">Няма активни инциденти в обхвата ви в момента. 🟢</div>';
+          return;
+        }
+        list.innerHTML = matches
+          .map(
+            ({ incident: inc, distanceKm: d }) => `
+        <div class="card ${inc.id === newId ? "new" : ""}" data-lat="${inc.lat}" data-lng="${inc.lng}">
+          <div class="row">
+            <span class="badge ${inc.type}">${inc.type === "ACCIDENT" ? "Катастрофа" : "Опасност"}</span>
+            ${inc.onScene ? '<span class="badge onscene">🔧 Помощ на място</span>' : ""}
+            <span class="dist">${km(d)}</span>
+          </div>
+          <div class="street">${inc.street || inc.city || "Неизвестно място"}</div>
+          <div class="meta">${inc.city || ""} · <a class="nav" href="${navUrl(inc.lat, inc.lng)}" target="_blank">Навигация →</a></div>
+          ${inc.onScene ? `<div class="onscene-by">Маркирано от ${inc.onSceneBy || "оператор"}</div>` : ""}
+          <button class="help-btn ${inc.onScene ? "active" : ""}" data-id="${inc.id}" data-onscene="${inc.onScene}">
+            ${inc.onScene ? "Отмени помощта" : "Маркирай помощ на място"}
+          </button>
+        </div>`,
+          )
+          .join("");
+        list.querySelectorAll(".card").forEach((card) => {
+          card.addEventListener("click", () =>
+            map.setView([+card.dataset.lat, +card.dataset.lng], 14),
+          );
+        });
+        list.querySelectorAll(".help-btn").forEach((btn) => {
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation(); // don't pan the map when toggling
+            toggleOnScene(btn.dataset.id, btn.dataset.onscene !== "true");
+          });
+        });
+      }
+
+      // Mark / clear "a roadside helper is on scene" (our rebuild of Waze's
+      // roadside-help button). The server broadcasts the change, so every operator's
+      // panel — including this one — relabels via the live stream.
+      async function toggleOnScene(id, onScene) {
+        await fetch(`/api/incidents/${id}/on-scene`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            onScene,
+            operator: selectedOperator ? selectedOperator.name : null,
+          }),
+        });
+        // Don't wait for the push round-trip to update our own view.
+        refreshMatches();
+      }
+
+      // Coalesce bursts of pushed incidents into a single refresh.
+      function scheduleRefresh(newId) {
+        if (!selectedOperator) return;
+        if (refreshTimer) clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(() => refreshMatches(newId), 400);
+      }
+
+      // Live feed — new incidents pushed from the server the moment they appear.
+      function connectStream() {
+        const es = new EventSource("/api/stream");
+        es.addEventListener("incident", (e) => {
+          const inc = JSON.parse(e.data);
+          scheduleRefresh(inc.id);
+        });
+      }
+
+      loadOperators().then(connectStream);
+    </script>
+  </body>
+</html>

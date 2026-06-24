@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: parv-na-myasto
+
+server:
+  port: ${PORT:8080}
+
+# Storage backend: "memory" (default, no DB) or "supabase" (Postgres).
+app:
+  storage: ${APP_STORAGE:memory}
+
+# Supabase Postgres — used only when app.storage=supabase.
+# From the Supabase dashboard: Project Settings → Database → Connection string (JDBC).
+supabase:
+  db-url: ${SUPABASE_DB_URL:}
+  db-user: ${SUPABASE_DB_USER:postgres}
+  db-password: ${SUPABASE_DB_PASSWORD:}
+
+# Live data source — TomTom Traffic Incident Details API, Bulgaria bounding box.
+# Get a free key at https://developer.tomtom.com. Supply the key out-of-repo via the
+# TOMTOM_API_KEY env var, or via the gitignored backend/config/application.yml override.
+tomtom:
+  api-key: ${TOMTOM_API_KEY:}
+  top: 44.22
+  bottom: 41.23
+  left: 22.36
+  right: 28.61
+
+# Ingestion cadence. Latency is the product, so poll often.
+poller:
+  fixed-delay-ms: ${POLLER_FIXED_DELAY_MS:90000}
+  initial-delay-ms: ${POLLER_INITIAL_DELAY_MS:3000}
+  enabled: ${POLLER_ENABLED:true}
+
+logging:
+  level:
+    com.parvnamyasto: INFO

@@ -1,0 +1,16 @@
+target/
+!.mvn/wrapper/maven-wrapper.jar
+*.class
+.env
+*.log
+
+# Local, out-of-repo config override holding secrets (e.g. TOMTOM_API_KEY)
+config/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
